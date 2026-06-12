@@ -2259,7 +2259,8 @@ unsafe extern "system" fn wnd_proc(
                 | IDM_LANG_GERMAN
                 | IDM_LANG_JAPANESE
                 | IDM_LANG_KOREAN
-                | IDM_LANG_TRADITIONAL_CHINESE => {
+                | IDM_LANG_TRADITIONAL_CHINESE
+                | IDM_LANG_RUSSIAN => {
                     let language_override = match id {
                         IDM_LANG_SYSTEM => None,
                         IDM_LANG_ENGLISH => Some(LanguageId::English),
@@ -2270,6 +2271,7 @@ unsafe extern "system" fn wnd_proc(
                         IDM_LANG_JAPANESE => Some(LanguageId::Japanese),
                         IDM_LANG_KOREAN => Some(LanguageId::Korean),
                         IDM_LANG_TRADITIONAL_CHINESE => Some(LanguageId::TraditionalChinese),
+                        IDM_LANG_RUSSIAN => Some(LanguageId::Russian),
                         _ => None,
                     };
                     {
@@ -2481,7 +2483,7 @@ fn show_context_menu(hwnd: HWND) {
                 LanguageId::Japanese => IDM_LANG_JAPANESE,
                 LanguageId::Korean => IDM_LANG_KOREAN,
                 LanguageId::TraditionalChinese => IDM_LANG_TRADITIONAL_CHINESE,
-                LanguageId::Russian => IDM_LANG_RUSSIAN
+                LanguageId::Russian => IDM_LANG_RUSSIAN,
             };
             let label_str = native_interop::wide_str(language.native_name());
             let flags = if language_override == Some(language) {

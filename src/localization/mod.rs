@@ -120,7 +120,7 @@ impl LanguageId {
                 } else {
                     None
                 }
-            },
+            }
             "ru" => Some(Self::Russian),
             _ => None,
         }

@@ -6,6 +6,7 @@ mod japanese;
 mod korean;
 mod spanish;
 mod traditional_chinese;
+mod russian;
 
 use windows::core::PWSTR;
 use windows::Win32::Globalization::{
@@ -23,10 +24,11 @@ pub enum LanguageId {
     Japanese,
     Korean,
     TraditionalChinese,
+    Russian,
 }
 
 impl LanguageId {
-    pub const ALL: [LanguageId; 8] = [
+    pub const ALL: [LanguageId; 9] = [
         LanguageId::English,
         LanguageId::Dutch,
         LanguageId::Spanish,
@@ -35,6 +37,7 @@ impl LanguageId {
         LanguageId::Japanese,
         LanguageId::Korean,
         LanguageId::TraditionalChinese,
+        LanguageId::Russian,
     ];
 
     pub fn code(self) -> &'static str {
@@ -47,6 +50,7 @@ impl LanguageId {
             Self::Japanese => "ja",
             Self::Korean => "ko",
             Self::TraditionalChinese => "zh-TW",
+            Self::Russian => "ru",
         }
     }
 
@@ -60,6 +64,7 @@ impl LanguageId {
             Self::Japanese => "日本語",
             Self::Korean => "한국어",
             Self::TraditionalChinese => "繁體中文",
+            Self::Russian => "Русский",
         }
     }
 
@@ -73,6 +78,7 @@ impl LanguageId {
             Self::Japanese => japanese::STRINGS,
             Self::Korean => korean::STRINGS,
             Self::TraditionalChinese => traditional_chinese::STRINGS,
+            Self::Russian => russian::STRINGS,
         }
     }
 
@@ -86,6 +92,7 @@ impl LanguageId {
             Self::Japanese => japanese::UPDATE_VIA_WINGET_LABEL,
             Self::Korean => korean::UPDATE_VIA_WINGET_LABEL,
             Self::TraditionalChinese => traditional_chinese::UPDATE_VIA_WINGET_LABEL,
+            Self::Russian => russian::UPDATE_VIA_WINGET_LABEL,
         }
     }
 
@@ -114,6 +121,7 @@ impl LanguageId {
                     None
                 }
             }
+            "ru" => Some(Self::Russian),
             _ => None,
         }
     }

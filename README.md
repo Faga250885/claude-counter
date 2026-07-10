@@ -1,6 +1,8 @@
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+🇬🇧 English | 🇪🇸 [Español](README.es.md)
+
 # Claude Counter
 
 A lightweight Windows taskbar widget that shows how much of your Claude Code, Codex, and/or Google Antigravity usage window you have left, without opening a terminal or the provider's site.

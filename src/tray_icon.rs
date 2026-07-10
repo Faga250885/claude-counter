@@ -47,44 +47,6 @@ impl TrayIconKind {
     }
 }
 
-fn lerp_channel(start: u8, end: u8, t: f64) -> u8 {
-    (start as f64 + (end as f64 - start as f64) * t.clamp(0.0, 1.0)).round() as u8
-}
-
-fn lerp_color(start: Color, end: Color, t: f64) -> Color {
-    Color::new(
-        lerp_channel(start.r, end.r, t),
-        lerp_channel(start.g, end.g, t),
-        lerp_channel(start.b, end.b, t),
-    )
-}
-
-fn interpolated_fill(percent: f64) -> Color {
-    if percent <= 50.0 {
-        return Color::from_hex("#D97757");
-    }
-
-    let stops = [
-        (50.0, Color::from_hex("#D97757")),
-        (70.0, Color::from_hex("#D08540")),
-        (85.0, Color::from_hex("#CC8C20")),
-        (95.0, Color::from_hex("#C45020")),
-        (100.0, Color::from_hex("#B82020")),
-    ];
-
-    for pair in stops.windows(2) {
-        let (start_pct, start_color) = pair[0];
-        let (end_pct, end_color) = pair[1];
-        if percent <= end_pct {
-            let span = (end_pct - start_pct).max(f64::EPSILON);
-            let t = (percent - start_pct) / span;
-            return lerp_color(start_color, end_color, t);
-        }
-    }
-
-    stops[stops.len() - 1].1
-}
-
 fn codex_fill(percent: f64) -> Color {
     if percent >= 90.0 {
         Color::from_hex("#FFFFFF")
@@ -101,6 +63,74 @@ fn antigravity_fill(percent: f64) -> Color {
     }
 }
 
+/// Draws a border that traces clockwise around the icon's perimeter,
+/// starting at the top-left corner, proportional to `percent` (0-100). At
+/// 100% it forms a complete outline; below that, only part of the
+/// perimeter is filled in, so the border itself reads as a progress bar.
+fn draw_perimeter_progress(mem_dc: HDC, size: i32, thickness: i32, percent: f64, color: Color) {
+    let percent = percent.clamp(0.0, 100.0);
+    if percent <= 0.0 {
+        return;
+    }
+    let side = size as f64;
+    let mut remaining = (percent / 100.0) * side * 4.0;
+
+    unsafe {
+        let brush = CreateSolidBrush(COLORREF(color.to_colorref()));
+
+        // Top edge: left -> right.
+        let top_len = remaining.min(side) as i32;
+        if top_len > 0 {
+            FillRect(
+                mem_dc,
+                &RECT { left: 0, top: 0, right: top_len, bottom: thickness },
+                brush,
+            );
+        }
+        remaining -= side;
+
+        // Right edge: top -> bottom.
+        if remaining > 0.0 {
+            let len = remaining.min(side) as i32;
+            if len > 0 {
+                FillRect(
+                    mem_dc,
+                    &RECT { left: size - thickness, top: 0, right: size, bottom: len },
+                    brush,
+                );
+            }
+            remaining -= side;
+        }
+
+        // Bottom edge: right -> left.
+        if remaining > 0.0 {
+            let len = remaining.min(side) as i32;
+            if len > 0 {
+                FillRect(
+                    mem_dc,
+                    &RECT { left: size - len, top: size - thickness, right: size, bottom: size },
+                    brush,
+                );
+            }
+            remaining -= side;
+        }
+
+        // Left edge: bottom -> top.
+        if remaining > 0.0 {
+            let len = remaining.min(side) as i32;
+            if len > 0 {
+                FillRect(
+                    mem_dc,
+                    &RECT { left: 0, top: size - len, right: thickness, bottom: size },
+                    brush,
+                );
+            }
+        }
+
+        let _ = DeleteObject(brush);
+    }
+}
+
 /// Create a rounded-rectangle tray icon badge showing the usage percentage.
 /// For Claude, `percent` = None uses the embedded app icon as the loading state.
 /// For Codex and Antigravity, `percent` = None uses a provider placeholder badge.
@@ -114,7 +144,11 @@ pub fn create_icon(kind: TrayIconKind, percent: Option<f64>) -> HICON {
 
     let size = 64_i32;
     let margin = 0_i32;
-    let radius = 2_i32;
+    let radius = if matches!(kind, TrayIconKind::Claude) {
+        4_i32
+    } else {
+        2_i32
+    };
     let outline = if matches!(kind, TrayIconKind::Codex | TrayIconKind::Antigravity) {
         3_i32
     } else {
@@ -122,7 +156,7 @@ pub fn create_icon(kind: TrayIconKind, percent: Option<f64>) -> HICON {
     };
 
     let fill = match kind {
-        TrayIconKind::Claude => interpolated_fill(percent.unwrap_or(0.0)),
+        TrayIconKind::Claude => Color::from_hex("#808080"),
         TrayIconKind::Codex => codex_fill(percent.unwrap_or(0.0)),
         TrayIconKind::Antigravity => antigravity_fill(percent.unwrap_or(0.0)),
     };
@@ -227,6 +261,16 @@ pub fn create_icon(kind: TrayIconKind, percent: Option<f64>) -> HICON {
         SelectObject(mem_dc, old_pen);
         let _ = DeleteObject(br_fill);
 
+        if matches!(kind, TrayIconKind::Claude) {
+            draw_perimeter_progress(
+                mem_dc,
+                size,
+                2,
+                percent.unwrap_or(0.0),
+                Color::from_hex("#FFFFFF"),
+            );
+        }
+
         // Draw centered percentage text
         let font_name = native_interop::wide_str("Arial Bold");
         let font = CreateFontW(
@@ -323,6 +367,9 @@ fn load_embedded_app_icon() -> HICON {
         if extracted == 0 {
             HICON::default()
         } else if !small_icon.is_invalid() {
+            if !large_icon.is_invalid() {
+                let _ = DestroyIcon(large_icon);
+            }
             small_icon
         } else {
             large_icon

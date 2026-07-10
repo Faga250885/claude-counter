@@ -1,6 +1,9 @@
 # Rust build artifacts
 /target/
 
+# Installer build output
+/installer/output/
+
 # Cargo lock (optional for binaries, included by default)
 # Cargo.lock
 

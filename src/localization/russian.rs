@@ -1,9 +1,7 @@
 use super::Strings;
 
-pub(super) const UPDATE_VIA_WINGET_LABEL: &str = "Обновить через WinGet";
-
 pub(super) const STRINGS: Strings = Strings {
-    window_title: "Монитор использования Claude Code",
+    window_title: "Claude Counter",
     refresh: "Обновить",
     update_frequency: "Частота обновления",
     one_minute: "1 минута",
@@ -19,17 +17,13 @@ pub(super) const STRINGS: Strings = Strings {
     reset_position: "Сбросить позицию",
     language: "Язык",
     system_default: "Системный по умолчанию",
-    check_for_updates: "Проверить обновления",
-    checking_for_updates: "Проверка обновлений...",
-    updates: "Обновления",
-    update_in_progress: "Проверка обновлений уже выполняется.",
-    up_to_date: "У вас уже установлена последняя версия.",
-    up_to_date_short: "Актуальная версия",
-    update_failed: "Не удалось обновить автоматически",
-    applying_update: "Применение обновления...",
-    update_to: "Обновить до",
-    update_available: "Доступно обновление",
-    update_prompt_now: "Доступна версия {version}. Обновить сейчас?",
+    monitor: "Монитор",
+    about: "О программе",
+    about_message: "Claude Counter\nСоздано: faga12@gmail.com\nРазработано с помощью Claude (Anthropic)\n\nНа основе проекта с открытым исходным кодом Claude-Code-Usage-Monitor (лицензия MIT).",
+    session_limit_line: "Лимит 5 часов: {pct}%, сброс через {time}",
+    weekly_limit_line: "Недельный лимит: {pct}%, сброс через {time}",
+    day_word_singular: "день",
+    day_word_plural: "дней",
     exit: "Выход",
     show_widget: "Показать виджет",
     session_window: "5ч",
@@ -45,6 +39,12 @@ pub(super) const STRINGS: Strings = Strings {
     codex_token_expired_body: "Запустите 'codex' в терминале и следуйте инструкциям для входа. После этого обновите или перезапустите приложение.",
     antigravity_token_expired_title: "Ошибка авторизации Antigravity",
     antigravity_token_expired_body: "Откройте Antigravity и войдите снова. После этого обновите или перезапустите приложение.",
+    no_credentials_title: "Настройка Claude Code",
+    no_credentials_body: "Учётные данные Claude Code не найдены. Выполните следующие шаги:\n\n1. Откройте PowerShell.\n2. Вставьте команду установки (уже скопирована в буфер обмена — просто нажмите Ctrl+V) и нажмите Enter.\n3. Выполните: claude\n4. Следуйте инструкциям для входа (используйте /login, если не предложено автоматически).\n5. Откройте приложение снова.",
+    codex_no_credentials_title: "Настройка Codex",
+    codex_no_credentials_body: "Учётные данные Codex не найдены. Выполните следующие шаги:\n\n1. Установите Codex CLI, если ещё не сделали этого.\n2. Откройте терминал и выполните: codex\n3. Следуйте инструкциям для входа.\n4. Откройте приложение снова.",
+    antigravity_no_credentials_title: "Настройка Antigravity",
+    antigravity_no_credentials_body: "Учётные данные Antigravity не найдены. Выполните следующие шаги:\n\n1. Откройте (или установите) Antigravity.\n2. Войдите в свою учётную запись.\n3. Откройте приложение снова.",
     codex_window_title: "Монитор использования Codex",
     antigravity_window_title: "Монитор использования Antigravity",
 };

@@ -1,8 +1,41 @@
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+};
+use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GHND};
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::Shell::{SHAppBarMessage, ABM_GETTASKBARPOS, APPBARDATA};
 use windows::Win32::UI::WindowsAndMessaging::*;
+
+/// Copies plain text to the system clipboard so the user can paste it (e.g.
+/// an install command) instead of retyping it from a dialog. Best-effort —
+/// failures are silently ignored since this is a convenience, not critical.
+pub fn copy_text_to_clipboard(text: &str) {
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return;
+        }
+        let _ = EmptyClipboard();
+
+        let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        let byte_len = wide.len() * std::mem::size_of::<u16>();
+        if let Ok(handle) = GlobalAlloc(GHND, byte_len) {
+            let ptr = GlobalLock(handle) as *mut u16;
+            if !ptr.is_null() {
+                std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
+                let _ = GlobalUnlock(handle);
+                const CF_UNICODETEXT: u32 = 13;
+                let _ = SetClipboardData(
+                    CF_UNICODETEXT,
+                    windows::Win32::Foundation::HANDLE(handle.0),
+                );
+            }
+        }
+
+        let _ = CloseClipboard();
+    }
+}
 
 // Window style constants
 pub const WS_POPUP_STYLE: u32 = 0x80000000;
@@ -17,7 +50,7 @@ pub const WINEVENT_OUTOFCONTEXT: u32 = 0x0000;
 pub const TIMER_POLL: usize = 1;
 pub const TIMER_COUNTDOWN: usize = 2;
 pub const TIMER_RESET_POLL: usize = 3;
-pub const TIMER_UPDATE_CHECK: usize = 4;
+pub const TIMER_ICON_ANIM: usize = 5;
 
 // Custom messages
 pub const WM_APP: u32 = 0x8000;
@@ -202,10 +235,16 @@ impl Color {
 
     pub fn from_hex(hex: &str) -> Self {
         let hex = hex.trim_start_matches('#');
-        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
-        Self { r, g, b }
+        let channel = |range| {
+            hex.get(range)
+                .and_then(|s| u8::from_str_radix(s, 16).ok())
+                .unwrap_or(0)
+        };
+        Self {
+            r: channel(0..2),
+            g: channel(2..4),
+            b: channel(4..6),
+        }
     }
 
     pub fn to_colorref(self) -> u32 {

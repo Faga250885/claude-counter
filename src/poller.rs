@@ -1487,6 +1487,9 @@ fn parse_datetime_to_unix(s: &str, _fmt: &str) -> Result<u64, ()> {
     let year: u64 = date_parts[0].parse().map_err(|_| ())?;
     let month: u64 = date_parts[1].parse().map_err(|_| ())?;
     let day: u64 = date_parts[2].parse().map_err(|_| ())?;
+    if !(1970..=9999).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return Err(());
+    }
 
     // Strip fractional seconds
     let time_base = time_str.split('.').next().unwrap_or(time_str);
@@ -1498,6 +1501,9 @@ fn parse_datetime_to_unix(s: &str, _fmt: &str) -> Result<u64, ()> {
     let hour: u64 = time_parts[0].parse().map_err(|_| ())?;
     let min: u64 = time_parts[1].parse().map_err(|_| ())?;
     let sec: u64 = time_parts[2].parse().map_err(|_| ())?;
+    if hour >= 24 || min >= 60 || sec >= 60 {
+        return Err(());
+    }
 
     // Days from year (using a simplified calculation for dates after 1970)
     let mut days: u64 = 0;
@@ -1523,7 +1529,7 @@ fn is_leap(y: u64) -> bool {
 
 /// Format a usage section as "X% · Yh" style text
 pub fn format_line(section: &UsageSection, strings: Strings) -> String {
-    let pct = format!("{:.0}%", section.percentage);
+    let pct = format!("{:02.0}%", section.percentage);
     let cd = format_countdown(section.resets_at, strings);
     if cd.is_empty() {
         pct
@@ -1561,7 +1567,11 @@ fn format_countdown_from_secs(total_secs: u64, strings: Strings) -> String {
     if total_days >= 1 {
         format!("{total_days}{}", strings.day_suffix)
     } else if total_hours >= 1 {
-        format!("{total_hours}{}", strings.hour_suffix)
+        let mins = total_mins % 60;
+        format!(
+            "{total_hours}{} {mins:02}{}",
+            strings.hour_suffix, strings.minute_suffix
+        )
     } else if total_mins >= 1 {
         format!("{total_mins}{}", strings.minute_suffix)
     } else {
@@ -1571,13 +1581,12 @@ fn format_countdown_from_secs(total_secs: u64, strings: Strings) -> String {
 
 fn time_until_display_change_from_secs(total_secs: u64) -> Duration {
     let total_mins = total_secs / 60;
-    let total_hours = total_secs / 3600;
     let total_days = total_secs / 86400;
 
+    // Below the days bucket, the display shows hours+minutes (or just
+    // minutes), so it changes every minute rather than every hour.
     let current_bucket_start = if total_days >= 1 {
         total_days * 86400
-    } else if total_hours >= 1 {
-        total_hours * 3600
     } else if total_mins >= 1 {
         total_mins * 60
     } else {

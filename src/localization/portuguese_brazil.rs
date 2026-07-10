@@ -1,9 +1,7 @@
 use super::Strings;
 
-pub(super) const UPDATE_VIA_WINGET_LABEL: &str = "Atualizar via WinGet";
-
 pub(super) const STRINGS: Strings = Strings {
-    window_title: "Monitor de Uso do Claude Code",
+    window_title: "Claude Counter",
     refresh: "Atualizar",
     update_frequency: "Frequência de Atualização",
     one_minute: "1 Minuto",
@@ -19,17 +17,13 @@ pub(super) const STRINGS: Strings = Strings {
     reset_position: "Redefinir Posição",
     language: "Idioma",
     system_default: "Padrão do Sistema",
-    check_for_updates: "Busca atualizações",
-    checking_for_updates: "Buscando por atualizações...",
-    updates: "Atualizações",
-    update_in_progress: "Uma verificação de atualização já está em andamento.",
-    up_to_date: "Você já tem a versão mais recente.",
-    up_to_date_short: "Atualizado",
-    update_failed: "Não foi possível atualizar automaticamente",
-    applying_update: "Aplicando atualização...",
-    update_to: "Atualizar para",
-    update_available: "Atualização disponível",
-    update_prompt_now: "Versão {version} está disponível. Deseja atualizar agora?",
+    monitor: "Monitor",
+    about: "Sobre",
+    about_message: "Claude Counter\nCriado por faga12@gmail.com\nDesenvolvido com a ajuda do Claude (Anthropic)\n\nBaseado no projeto de código aberto Claude-Code-Usage-Monitor (Licença MIT).",
+    session_limit_line: "Limite de 5 horas em {pct}%, reinicia em {time}",
+    weekly_limit_line: "Limite semanal em {pct}%, reinicia em {time}",
+    day_word_singular: "dia",
+    day_word_plural: "dias",
     exit: "Sair",
     show_widget: "Exibir Widget",
     session_window: "5h",
@@ -45,6 +39,12 @@ pub(super) const STRINGS: Strings = Strings {
     codex_token_expired_body: "Execute 'codex' em um terminal e siga as instruções de login. Depois disso, atualize ou reinicie este aplicativo.",
     antigravity_token_expired_title: "Erro de Autenticação do Antigravity",
     antigravity_token_expired_body: "Abra o Antigravity e entre novamente. Depois disso, atualize ou reinicie este aplicativo.",
+    no_credentials_title: "Configurar o Claude Code",
+    no_credentials_body: "Nenhuma credencial do Claude Code foi encontrada. Siga estes passos:\n\n1. Abra o PowerShell.\n2. Cole o comando de instalacao (ja copiado para a area de transferencia — basta pressionar Ctrl+V) e pressione Enter.\n3. Execute: claude\n4. Siga as instruções de login (use /login se nao for solicitado automaticamente).\n5. Abra este aplicativo novamente.",
+    codex_no_credentials_title: "Configurar o Codex",
+    codex_no_credentials_body: "Nenhuma credencial do Codex foi encontrada. Siga estes passos:\n\n1. Instale a CLI do Codex se ainda nao tiver.\n2. Abra um terminal e execute: codex\n3. Siga as instruções de login.\n4. Abra este aplicativo novamente.",
+    antigravity_no_credentials_title: "Configurar o Antigravity",
+    antigravity_no_credentials_body: "Nenhuma credencial do Antigravity foi encontrada. Siga estes passos:\n\n1. Abra (ou instale) o Antigravity.\n2. Entre com sua conta.\n3. Abra este aplicativo novamente.",
     codex_window_title: "Monitor de uso do Codex",
     antigravity_window_title: "Monitor de uso do Antigravity",
 };

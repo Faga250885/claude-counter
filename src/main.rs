@@ -7,7 +7,6 @@ mod native_interop;
 mod poller;
 mod theme;
 mod tray_icon;
-mod updater;
 mod window;
 
 fn main() {
@@ -21,13 +20,6 @@ fn main() {
                 let _ = error;
             }
         }
-    }
-
-    if let Some(exit_code) = updater::handle_cli_mode(&args) {
-        if diagnose_enabled {
-            diagnose::log(format!("cli mode exited with code {exit_code}"));
-        }
-        std::process::exit(exit_code);
     }
 
     if diagnose_enabled {

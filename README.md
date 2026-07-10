@@ -54,6 +54,15 @@ claude
 
 Then follow the sign-in prompts (use `/login` if it doesn't ask automatically).
 
+### A note about the Windows warning
+
+When you run the installer, Windows may show a "Windows protected your PC" screen. This isn't a virus warning — it just means the installer isn't digitally signed yet, so Windows can't vouch for the publisher.
+
+To continue:
+
+1. Click **More info**
+2. Click **Run anyway**
+
 ## Use
 
 Once running, the widget appears in your taskbar and as one or more tray icons in the notification area.

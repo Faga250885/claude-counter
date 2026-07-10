@@ -54,6 +54,15 @@ claude
 
 Después seguí las indicaciones para iniciar sesión (usá `/login` si no te lo pide automáticamente).
 
+### Una nota sobre la advertencia de Windows
+
+Al ejecutar el instalador, es posible que Windows muestre una pantalla de "Windows protegió su PC". No es una advertencia de virus — solo significa que el instalador todavía no está firmado digitalmente, así que Windows no puede confirmar quién lo publicó.
+
+Para continuar:
+
+1. Hacé clic en **Más información**
+2. Hacé clic en **Ejecutar de todas formas**
+
 ## Uso
 
 Una vez en ejecución, el widget aparece en tu barra de tareas y como uno o más iconos en el área de notificación.

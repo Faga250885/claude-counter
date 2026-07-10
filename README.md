@@ -1,25 +1,21 @@
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-# Claude Code Usage Monitor
+# Claude Counter
 
-![Screenshot](.github/animation.gif)
-
-A lightweight Windows taskbar widget for people already using Claude Code, with optional Codex and Google Antigravity usage display.
-
-It sits in your taskbar and shows how much of your Claude Code, Codex, and/or Antigravity usage window you have left, without needing to open the terminal or the provider site.
+A lightweight Windows taskbar widget that shows how much of your Claude Code, Codex, and/or Google Antigravity usage window you have left, without opening a terminal or the provider's site.
 
 ## What You Get
 
 - A **5h** bar for your current 5-hour Claude usage window
 - A **7d** bar for your current 7-day window
+- A live countdown next to each bar showing exactly when the limit resets (e.g. `1h 19m`, `2d`)
+- A small animated mascot: it walks faster the more quota you have left, slows down as you approach the limit, and falls asleep once a window hits 100%
+- A small native widget that lives directly in the Windows taskbar, automatically matching the taskbar's own light or dark tone
+- System tray icon badge with a progress border showing your usage
 - Optional Codex usage bars alongside Claude Code
-- Optional Antigravity model usage bars for Google's 5-hour and weekly Gemini quota windows
-- A live countdown until each limit resets
-- A small native widget that lives directly in the Windows taskbar
-- System tray icon badges showing your enabled model usage percentage
-- Left-click the tray icon to toggle the taskbar widget on or off
-- Right-click options for refresh, displayed models, update frequency, language, startup, widget visibility, and updates
+- Optional Antigravity usage bars for Google's 5-hour and weekly quota windows
+- Right-click options for refresh, displayed models, update frequency, language, startup, and widget visibility
 - Multi-monitor taskbar placement, so the widget can live on the taskbar for the screen you prefer
 
 ## Who This Is For
@@ -39,31 +35,30 @@ It works best if you want a simple "how close am I to the limit?" display that i
 - Optional: Codex CLI installed and authenticated, if you want Codex usage
 - Optional: Google Antigravity installed and authenticated, if you want Antigravity usage
 
-If you use Claude Code through WSL, that is supported too. The monitor can read your Claude Code credentials from Windows or from your WSL environment.
+If you use Claude Code through WSL, that is supported too. The app can read your Claude Code credentials from Windows or from your WSL environment.
 
 ## Install
 
-Install the latest version from WinGet:
+1. Download the latest `ClaudeCounter-Setup.exe` from the [Releases](../../releases) page.
+2. Run it. No administrator rights are required.
+3. If this is the first time you're using Claude Code on this PC, the installer walks you through getting the CLI installed and signed in before you can finish.
+
+Don't have the Claude Code CLI yet? The installer's setup step covers it, but you can also do it yourself at any time:
 
 ```powershell
-winget install CodeZeno.ClaudeCodeUsageMonitor
+irm https://claude.ai/install.ps1 | iex
+claude
 ```
 
-If you prefer not to use WinGet, you can still download the latest `claude-code-usage-monitor.exe` from the [Releases](https://github.com/CodeZeno/Claude-Code-Usage-Monitor/releases) page and run it directly.
+Then follow the sign-in prompts (use `/login` if it doesn't ask automatically).
 
 ## Use
 
-After installing with WinGet, run:
+Once running, the widget appears in your taskbar and as one or more tray icons in the notification area.
 
-```powershell
-claude-code-usage-monitor
-```
-
-Once running, it will appear in your taskbar and as one or more tray icons in the notification area.
-
-- Drag the left divider to move the taskbar widget
+- Drag the mascot icon to move the taskbar widget
 - On multi-monitor setups, drag the widget onto another Windows taskbar to move it to that screen
-- Right-click the taskbar widget or tray icon for refresh, displayed models, update frequency, Start with Windows, reset position, language, updates, and exit
+- Right-click the taskbar widget or tray icon for refresh, displayed models, update frequency, Start with Windows, reset position, language, and exit
 - Left-click the tray icon to toggle the taskbar widget on or off
 - Enable `Start with Windows` from the right-click menu if you want it to launch automatically when you sign in
 
@@ -75,24 +70,20 @@ Use the right-click **Models** menu to choose what the widget displays:
 - **Codex** can be enabled alongside Claude Code or shown by itself
 - **Antigravity** can be enabled alongside the other providers or shown by itself as its own model column
 
-When multiple models are shown, each model has its own usage bar and matching usage text color. Antigravity prefers Google's Gemini quota summary when available and falls back to model quota data when needed.
+When multiple models are shown, each model has its own usage bar and matching usage text color.
 
 ### System Tray Icon
 
-The tray icon shows your current 5-hour usage as a percentage badge.
+The tray icon shows your current 5-hour usage as a percentage badge, with a white border that traces around the icon's perimeter proportionally to your usage.
 
 If multiple providers are enabled, the app shows one tray icon per provider. If only one model is enabled, it shows one tray icon.
 
-The Claude Code tray icon uses the same warm usage colors as the Claude bar. The Codex tray icon uses a black and white badge style. The Antigravity tray icon uses a blue badge style.
-
-Hovering over a tray icon shows the usage values for that model.
-
 ## Diagnostics
 
-If you need to troubleshoot startup or visibility issues, run:
+If you need to troubleshoot startup or visibility issues, run the installed executable with:
 
 ```powershell
-claude-code-usage-monitor --diagnose
+claude-code-usage-monitor.exe --diagnose
 ```
 
 This writes a log file to:
@@ -106,17 +97,6 @@ Settings are saved to:
 ```text
 %APPDATA%\ClaudeCodeUsageMonitor\settings.json
 ```
-
-## Account Support
-
-This app works with the same account types that Claude Code itself supports.
-
-As of **March 19, 2026**, Anthropic's Claude Code setup documentation says:
-
-- **Supported:** Pro, Max, Teams, Enterprise, and Console accounts
-- **Not supported:** the free Claude.ai plan
-
-If Anthropic changes Claude Code availability in the future, this app should follow whatever Claude Code supports, as long as the usage data remains exposed through the same authenticated endpoints.
 
 ## Privacy And Security
 
@@ -134,7 +114,6 @@ What the app sends over the network:
 - Requests to Anthropic's Claude endpoints to read your usage and rate-limit information
 - Requests to ChatGPT's Codex usage endpoint to read your Codex usage and rate-limit information, if Codex is enabled
 - Requests to Google's Cloud Code / Antigravity endpoints to read your Antigravity quota information, if Antigravity is enabled
-- Requests to GitHub only if you use the app's update check / self-update feature
 - If proxy environment variables such as `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY` are set, those outbound requests may use that proxy
 
 What the app stores locally:
@@ -144,7 +123,6 @@ What the app stores locally:
 - Widget visibility
 - Polling frequency
 - Language preference
-- Last update check time
 - Displayed model preferences
 
 What it does **not** do:
@@ -158,14 +136,13 @@ What it does **not** do:
 Notes:
 
 - If your Claude Code token is expired, the app may ask the local Claude CLI to refresh it in the background
-- If your Codex token is expired, the app may ask the local Codex CLI to refresh it in the background. The monitor does not write `auth.json` itself; any credential update is handled by the Codex CLI.
-- If your Antigravity token is expired, open Antigravity and sign in again. The monitor does not write Windows Credential Manager entries itself.
-- Portable installs can update themselves by downloading the latest release from this repository
+- If your Codex token is expired, the app may ask the local Codex CLI to refresh it in the background. The app does not write `auth.json` itself; any credential update is handled by the Codex CLI.
+- If your Antigravity token is expired, open Antigravity and sign in again. The app does not write Windows Credential Manager entries itself.
 - Proxies should be trusted because proxied usage requests include your OAuth bearer token inside the TLS connection
 
 ## How It Works
 
-The monitor:
+The app:
 
 1. Finds your enabled model login credentials
 2. Reads your current usage from Anthropic, ChatGPT, and/or Google's Antigravity endpoints
@@ -177,6 +154,6 @@ If the newer usage endpoint is unavailable, it can fall back to reading the rate
 
 ## Open Source
 
-This project is licensed under MIT.
+This project is licensed under MIT and based on the open-source [Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor) project by Craig Constable.
 
 If you want to inspect the behavior or audit the code, everything is in this repository.

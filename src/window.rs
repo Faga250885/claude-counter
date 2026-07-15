@@ -2116,7 +2116,15 @@ unsafe extern "system" fn wnd_proc(
                 check_language_change();
             }
             refresh_dpi();
-            position_at_taskbar();
+            if msg == WM_SETTINGCHANGE {
+                // WM_SETTINGCHANGE is broadcast for many unrelated system
+                // setting updates, not just display/taskbar ones — a full
+                // reposition here would visibly shift the widget far more
+                // often than the screen layout actually changes.
+                reposition_if_tray_overlaps();
+            } else {
+                position_at_taskbar();
+            }
             render_layered();
             LRESULT(0)
         }

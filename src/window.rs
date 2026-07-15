@@ -529,13 +529,25 @@ fn attach_to_taskbar(hwnd: HWND, requested_index: usize) -> bool {
         diagnose::log("tray event hook could not be installed");
     }
 
-    let mut state = lock_state();
-    if let Some(s) = state.as_mut() {
-        s.taskbar_hwnd = Some(taskbar.hwnd);
-        s.tray_notify_hwnd = tray_notify;
-        s.win_event_hook = hook;
-        s.taskbar_index = index;
-        s.embedded = true;
+    let index_changed = {
+        let mut state = lock_state();
+        if let Some(s) = state.as_mut() {
+            s.taskbar_hwnd = Some(taskbar.hwnd);
+            s.tray_notify_hwnd = tray_notify;
+            s.win_event_hook = hook;
+            let changed = s.taskbar_index != index;
+            s.taskbar_index = index;
+            s.embedded = true;
+            changed
+        } else {
+            false
+        }
+    };
+    // Persist immediately so an auto-selected taskbar (e.g. after a monitor
+    // was unplugged and only one is left) is remembered for next launch,
+    // not just switches made explicitly through the Monitor menu.
+    if index_changed {
+        save_state_settings();
     }
     true
 }
@@ -1980,6 +1992,46 @@ fn compute_anchor_y(anchor_top: i32, anchor_height: i32, widget_height: i32) -> 
     (anchor_bottom - widget_height).max(anchor_top)
 }
 
+/// Repositions only if the widget's current on-screen spot would now
+/// overlap the tray notification area (e.g. new icons grew leftward into
+/// where the widget sits). Otherwise the widget is left exactly where the
+/// user last placed it, instead of drifting every time a tray icon comes
+/// or goes.
+fn reposition_if_tray_overlaps() {
+    let (hwnd, taskbar_hwnd) = {
+        let state = lock_state();
+        let s = match state.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+        if s.dragging {
+            return;
+        }
+        let taskbar_hwnd = match s.taskbar_hwnd {
+            Some(h) => h,
+            None => return,
+        };
+        (s.hwnd.to_hwnd(), taskbar_hwnd)
+    };
+
+    let taskbar_rect = match native_interop::get_taskbar_rect(taskbar_hwnd) {
+        Some(r) => r,
+        None => return,
+    };
+    let tray_left = tray_left_for_taskbar(taskbar_hwnd, taskbar_rect);
+
+    let current_rect = match native_interop::get_window_rect_safe(hwnd) {
+        Some(r) => r,
+        None => return,
+    };
+
+    if current_rect.right <= tray_left {
+        return;
+    }
+
+    position_at_taskbar();
+}
+
 /// WinEvent callback for tray icon location changes
 unsafe extern "system" fn on_tray_location_changed(
     _hook: HWINEVENTHOOK,
@@ -2020,7 +2072,7 @@ unsafe extern "system" fn on_tray_location_changed(
             }
         };
         if should_reposition {
-            position_at_taskbar();
+            reposition_if_tray_overlaps();
             render_layered();
         }
     }

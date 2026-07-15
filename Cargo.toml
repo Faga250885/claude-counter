@@ -50,4 +50,6 @@ opt-level = "z"
 lto = true
 strip = true
 codegen-units = 1
-panic = "abort"
+# Unwind (not abort) so a panic on the detached polling worker thread is
+# contained to that thread instead of killing the whole widget process.
+panic = "unwind"

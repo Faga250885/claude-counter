@@ -1159,11 +1159,22 @@ fn get_header_i64(response: &ureq::Response, name: &str) -> Option<i64> {
 }
 
 fn unix_to_system_time(unix_secs: Option<i64>) -> Option<SystemTime> {
-    let secs = unix_secs?;
+    let mut secs = unix_secs?;
     if secs < 0 {
         return None;
     }
-    Some(UNIX_EPOCH + Duration::from_secs(secs as u64))
+    // Some providers occasionally return the reset timestamp in
+    // milliseconds. A value that large would be centuries in the future and,
+    // more importantly, could overflow SystemTime. Detect the millisecond
+    // case (anything past ~year 5000) and fold it back to seconds.
+    if secs > 100_000_000_000 {
+        secs /= 1000;
+    }
+    // checked_add returns None instead of panicking if the value is still out
+    // of the representable range — SystemTime is FILETIME-backed on Windows
+    // and `UNIX_EPOCH + Duration` would otherwise panic on overflow, which
+    // (as a panic on the polling thread) could take down the whole process.
+    UNIX_EPOCH.checked_add(Duration::from_secs(secs as u64))
 }
 
 struct Credentials {

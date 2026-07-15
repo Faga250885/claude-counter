@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -20,8 +20,8 @@ use crate::diagnose;
 use crate::localization::{self, LanguageId, Strings};
 use crate::models::AppUsageData;
 use crate::native_interop::{
-    self, Color, TIMER_COUNTDOWN, TIMER_ICON_ANIM, TIMER_POLL, TIMER_RESET_POLL, WM_APP_TRAY,
-    WM_APP_USAGE_UPDATED,
+    self, Color, TIMER_COUNTDOWN, TIMER_ICON_ANIM, TIMER_POLL, TIMER_RESET_POLL, WM_APP_REEMBED,
+    WM_APP_TRAY, WM_APP_USAGE_UPDATED,
 };
 use crate::poller;
 use crate::theme;
@@ -138,6 +138,12 @@ static CURRENT_DPI: AtomicU32 = AtomicU32::new(96);
 static ICON_ANIM_FRAME: AtomicU32 = AtomicU32::new(0);
 const ICON_ANIM_INTERVAL_MS: u32 = 90;
 
+/// Set to true only when the user explicitly chooses Exit. Distinguishes a
+/// deliberate quit from an involuntary WM_DESTROY caused by Windows tearing
+/// down the taskbar we're parented into — in the latter case we relaunch
+/// instead of letting the process die.
+static USER_QUIT: AtomicBool = AtomicBool::new(false);
+
 /// Scale a base pixel value (designed at 96 DPI) to the current DPI.
 fn sc(px: i32) -> i32 {
     let dpi = CURRENT_DPI.load(Ordering::Relaxed);
@@ -170,6 +176,10 @@ const ENV_RELAUNCH: &str = "CCUM_RELAUNCH";
 /// Unix timestamp (seconds) of the relaunch that spawned this process, passed to
 /// the child so it can detect a relaunch storm.
 const ENV_LAST_RELAUNCH_UNIX: &str = "CCUM_LAST_RELAUNCH_UNIX";
+/// Set on a child spawned during a relaunch storm, telling it to back off at
+/// startup (while already holding the single-instance mutex) instead of the
+/// dying parent sleeping — so a replacement always gets spawned promptly.
+const ENV_RELAUNCH_STORM: &str = "CCUM_RELAUNCH_STORM";
 
 /// Relaunch the widget as a fresh process after explorer.exe has restarted.
 ///
@@ -181,17 +191,17 @@ const ENV_LAST_RELAUNCH_UNIX: &str = "CCUM_LAST_RELAUNCH_UNIX";
 /// via `ENV_RELAUNCH` so it waits for this instance's single-instance mutex to
 /// be released before taking over (see the guard in `run`).
 fn relaunch_self() {
-    // Back off if we are relaunching very soon after the relaunch that spawned
-    // us: that signals the shell is crash-looping, not a one-off restart.
     let now = now_unix_secs();
-    let last = std::env::var(ENV_LAST_RELAUNCH_UNIX)
+    // If we're relaunching very soon after we ourselves were spawned, the
+    // shell is churning (crash-looping / rapid Win11 taskbar recreation).
+    // We still spawn a replacement immediately, but flag it to back off at
+    // its own startup — NEVER sleep here, because this dying process could
+    // be torn down (WM_DESTROY) before it gets to spawn, leaving nothing.
+    let spawned_at = std::env::var(ENV_LAST_RELAUNCH_UNIX)
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
-    if last != 0 && now.saturating_sub(last) < RELAUNCH_THROTTLE_SECS {
-        diagnose::log("relaunch storm detected; backing off before relaunching");
-        std::thread::sleep(Duration::from_secs(RELAUNCH_BACKOFF_SECS));
-    }
+    let is_storm = spawned_at != 0 && now.saturating_sub(spawned_at) < RELAUNCH_THROTTLE_SECS;
 
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
@@ -202,12 +212,14 @@ fn relaunch_self() {
     };
 
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match std::process::Command::new(exe)
-        .args(&args)
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(&args)
         .env(ENV_RELAUNCH, "1")
-        .env(ENV_LAST_RELAUNCH_UNIX, now.to_string())
-        .spawn()
-    {
+        .env(ENV_LAST_RELAUNCH_UNIX, now.to_string());
+    if is_storm {
+        cmd.env(ENV_RELAUNCH_STORM, "1");
+    }
+    match cmd.spawn() {
         Ok(_) => {
             diagnose::log("watchdog: relaunched fresh instance, exiting old one");
             std::process::exit(0);
@@ -218,30 +230,44 @@ fn relaunch_self() {
     }
 }
 
-/// Detect explorer.exe restarts and recover from them.
+/// Detect taskbar changes and recover from them.
 ///
-/// Once explorer destroys the taskbar, our embedded child window is destroyed
-/// and the UI message loop is dead, so recovery cannot happen in-process. This
-/// dedicated thread (independent of the dead message loop) polls the taskbar
-/// handle and, when it changes, relaunches the widget as a fresh process.
+/// On Windows 11 the taskbar (`Shell_TrayWnd`) is recreated with a new hwnd
+/// far more often than a full explorer.exe restart — relayout, DPI change, a
+/// monitor sleeping/waking. In most of those cases our own window survives, so
+/// the right recovery is to re-embed in place (cheap, no flicker) rather than
+/// relaunch the whole process. We only relaunch when our own window is truly
+/// gone (a real explorer restart destroys it and parks the UI thread in
+/// GetMessage with nothing to recover in-process).
 fn spawn_taskbar_watchdog() {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(TASKBAR_WATCH_INTERVAL_SECS));
-        let stored = {
+        let (stored, our_hwnd) = {
             let state = lock_state();
-            state.as_ref().and_then(|s| s.taskbar_hwnd)
+            match state.as_ref() {
+                Some(s) => (s.taskbar_hwnd, s.hwnd.to_hwnd()),
+                None => (None, HWND::default()),
+            }
         };
         // Only relevant once we have embedded into a taskbar at least once.
         let Some(old) = stored else {
             continue;
         };
         let taskbars = native_interop::find_taskbars();
-        if !taskbars.is_empty() && !taskbars.iter().any(|taskbar| taskbar.hwnd == old) {
-            let new = taskbars[0].hwnd;
-            diagnose::log(format!(
-                "watchdog: taskbar changed old={:?} new={:?} -> relaunching",
-                old.0, new.0
-            ));
+        let taskbar_gone = !taskbars.is_empty() && !taskbars.iter().any(|t| t.hwnd == old);
+        if !taskbar_gone {
+            continue;
+        }
+
+        if native_interop::is_window(our_hwnd) {
+            // Our window is still alive — just re-embed into the new taskbar
+            // on the UI thread instead of killing and relaunching the process.
+            diagnose::log("watchdog: taskbar changed but our window is alive -> re-embed in place");
+            unsafe {
+                let _ = PostMessageW(our_hwnd, WM_APP_REEMBED, WPARAM(0), LPARAM(0));
+            }
+        } else {
+            diagnose::log("watchdog: taskbar gone and our window destroyed -> relaunching");
             relaunch_self();
         }
     });
@@ -529,6 +555,12 @@ fn attach_to_taskbar(hwnd: HWND, requested_index: usize) -> bool {
         diagnose::log("tray event hook could not be installed");
     }
 
+    // Only persist the index when the requested one was actually honored. If
+    // it was clamped down because fewer taskbars were detected this launch
+    // (e.g. a second monitor hadn't come up yet), keep the user's saved
+    // preference on disk so it's restored when that monitor returns — writing
+    // the clamped value would permanently overwrite their choice.
+    let honored = index == requested_index;
     let index_changed = {
         let mut state = lock_state();
         if let Some(s) = state.as_mut() {
@@ -543,10 +575,7 @@ fn attach_to_taskbar(hwnd: HWND, requested_index: usize) -> bool {
             false
         }
     };
-    // Persist immediately so an auto-selected taskbar (e.g. after a monitor
-    // was unplugged and only one is left) is remembered for next launch,
-    // not just switches made explicitly through the Monitor menu.
-    if index_changed {
+    if index_changed && honored {
         save_state_settings();
     }
     true
@@ -564,14 +593,35 @@ fn taskbar_at_point(pt: POINT) -> Option<(usize, native_interop::TaskbarWindow)>
         })
 }
 
+/// Screen x-coordinate of the left edge of the notification area, which is
+/// where we anchor the widget (just to its left). On Windows 11 the modern
+/// XAML taskbar keeps a legacy `TrayNotifyWnd` only for compatibility, and its
+/// `GetWindowRect` does NOT reflect the visible clock/tray position — it often
+/// reports a left near the START of the bar (or a ~0 width). Trusting that
+/// value collapses the widget to x≈0. So we validate it: the tray must sit in
+/// the right portion of the taskbar and leave room for the widget; otherwise
+/// we fall back to the taskbar's right edge, which yields a correct anchor.
 fn tray_left_for_taskbar(taskbar_hwnd: HWND, taskbar_rect: RECT) -> i32 {
-    let mut tray_left = taskbar_rect.right;
-    if let Some(tray_hwnd) = native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd") {
-        if let Some(tray_rect) = native_interop::get_window_rect_safe(tray_hwnd) {
-            tray_left = tray_rect.left;
-        }
+    let fallback = taskbar_rect.right;
+    let Some(tray_hwnd) = native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd") else {
+        return fallback;
+    };
+    let Some(tray_rect) = native_interop::get_window_rect_safe(tray_hwnd) else {
+        return fallback;
+    };
+    let taskbar_width = taskbar_rect.right - taskbar_rect.left;
+    let min_valid_left = taskbar_rect.left + total_widget_width();
+    // Reject a degenerate/legacy stub: the tray must be wide enough, must
+    // start past where the widget would go, and must live in the right half
+    // of the taskbar. Anything else is the Win11 legacy stub — use fallback.
+    let tray_width = tray_rect.right - tray_rect.left;
+    if tray_width < 4
+        || tray_rect.left < min_valid_left
+        || tray_rect.left < taskbar_rect.left + taskbar_width / 2
+    {
+        return fallback;
     }
-    tray_left
+    tray_rect.left
 }
 
 fn clamp_offset_for_taskbar(taskbar_hwnd: HWND, taskbar_rect: RECT, offset: i32) -> i32 {
@@ -944,11 +994,22 @@ pub fn run() {
                 if GetLastError() == ERROR_ALREADY_EXISTS {
                     if is_relaunch {
                         diagnose::log("relaunch: waiting for previous instance to exit");
-                        let wait_result = WaitForSingleObject(h, 10_000);
-                        if wait_result != WAIT_OBJECT_0 && wait_result != WAIT_ABANDONED {
-                            diagnose::log(format!(
-                                "startup aborted: previous instance did not exit cleanly ({wait_result:?})"
-                            ));
+                        // Retry the wait a few times rather than aborting on a
+                        // single 10s timeout — the outgoing instance may take a
+                        // moment to release the mutex. Aborting here would leave
+                        // no running instance at all.
+                        let mut acquired = false;
+                        for _ in 0..6 {
+                            let wait_result = WaitForSingleObject(h, 10_000);
+                            if wait_result == WAIT_OBJECT_0 || wait_result == WAIT_ABANDONED {
+                                acquired = true;
+                                break;
+                            }
+                        }
+                        if !acquired {
+                            diagnose::log(
+                                "startup aborted: previous instance did not release the mutex",
+                            );
                             return;
                         }
                     } else {
@@ -967,6 +1028,15 @@ pub fn run() {
             }
         }
     };
+
+    // If we were spawned during a relaunch storm, back off HERE — while we
+    // already hold the single-instance mutex, so no other instance can spawn
+    // meanwhile. This replaces the dying parent sleeping before spawning us,
+    // which risked the parent being torn down before a replacement existed.
+    if std::env::var(ENV_RELAUNCH_STORM).is_ok() {
+        diagnose::log("relaunch storm: backing off at startup before embedding");
+        std::thread::sleep(Duration::from_secs(RELAUNCH_BACKOFF_SECS));
+    }
 
     let class_name = native_interop::wide_str("ClaudeCodeUsageMonitor");
 
@@ -1547,7 +1617,20 @@ fn paint_content(
     }
 }
 
+/// Entry point for the detached polling worker thread. Wraps the real work
+/// in `catch_unwind` so an unexpected panic (e.g. from parsing malformed
+/// network data) is contained to this thread and logged, instead of taking
+/// down the whole widget process.
 fn do_poll(send_hwnd: SendHwnd) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        do_poll_inner(send_hwnd);
+    }));
+    if result.is_err() {
+        diagnose::log("do_poll: panic caught on polling thread (process kept alive)");
+    }
+}
+
+fn do_poll_inner(send_hwnd: SendHwnd) {
     let hwnd = send_hwnd.to_hwnd();
     let (show_claude_code, show_codex, show_antigravity) = {
         let state = lock_state();
@@ -1937,35 +2020,20 @@ fn position_at_taskbar() {
     };
 
     let taskbar_height = taskbar_rect.bottom - taskbar_rect.top;
-    let mut tray_left = taskbar_rect.right;
     let anchor_top = taskbar_rect.top;
     let anchor_height = taskbar_height;
 
-    if let Some(tray_hwnd) = native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd") {
-        if let Some(tray_rect) = native_interop::get_window_rect_safe(tray_hwnd) {
-            tray_left = tray_rect.left;
-        }
-    }
+    // Use the validated tray edge (falls back to the taskbar's right edge if
+    // the Win11 legacy TrayNotifyWnd stub reports a bogus position).
+    let tray_left = tray_left_for_taskbar(taskbar_hwnd, taskbar_rect);
 
     let widget_width = total_widget_width();
+    // Clamp the offset only for THIS frame's x computation. Do NOT write the
+    // clamped value back to state/disk: a transient bad tray_left would
+    // otherwise permanently destroy the user's saved position. The stored
+    // tray_offset is only ever changed by an explicit user drag.
     let max_offset = (tray_left - taskbar_rect.left - widget_width).max(0);
     let tray_offset = tray_offset.clamp(0, max_offset);
-    let offset_changed = {
-        let mut state = lock_state();
-        if let Some(s) = state.as_mut() {
-            if s.tray_offset != tray_offset {
-                s.tray_offset = tray_offset;
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    };
-    if offset_changed {
-        save_state_settings();
-    }
 
     let widget_height = sc(WIDGET_HEIGHT);
     let y = compute_anchor_y(anchor_top, anchor_height, widget_height);
@@ -2061,8 +2129,12 @@ unsafe extern "system" fn on_tray_location_changed(
         let should_reposition = {
             let mut last = LAST_REPOSITION.lock().unwrap_or_else(|e| e.into_inner());
             let now = std::time::Instant::now();
+            // Debounce hard: Win11 fires EVENT_OBJECT_LOCATIONCHANGE on the
+            // tray constantly (clock ticks, flyout animations). Only act at
+            // most once every ~1.5s, and even then reposition_if_tray_overlaps
+            // no-ops unless the widget actually overlaps the (validated) tray.
             if last
-                .map(|t| now.duration_since(t).as_millis() > 500)
+                .map(|t| now.duration_since(t).as_millis() > 1500)
                 .unwrap_or(true)
             {
                 *last = Some(now);
@@ -2207,6 +2279,21 @@ unsafe extern "system" fn wnd_proc(
                 TRAY_ICON_UPDATE_REPOSITION_SUPPRESS_MS,
             ));
             sync_tray_icons(hwnd);
+            LRESULT(0)
+        }
+        _ if msg == WM_APP_REEMBED => {
+            // The watchdog saw the taskbar get recreated while our window is
+            // still alive. Re-embed into the current taskbar in place.
+            let taskbar_index = {
+                let state = lock_state();
+                state.as_ref().map(|s| s.taskbar_index).unwrap_or(0)
+            };
+            if attach_to_taskbar(hwnd, taskbar_index) {
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                position_at_taskbar();
+                render_layered();
+                sync_tray_icons(hwnd);
+            }
             LRESULT(0)
         }
         WM_SETCURSOR => {
@@ -2408,6 +2495,7 @@ unsafe extern "system" fn wnd_proc(
                     });
                 }
                 2 => {
+                    USER_QUIT.store(true, Ordering::SeqCst);
                     let hook = {
                         let state = lock_state();
                         state.as_ref().and_then(|s| s.win_event_hook)
@@ -2580,7 +2668,18 @@ unsafe extern "system" fn wnd_proc(
                 native_interop::unhook_win_event(h);
             }
             tray_icon::remove_all(hwnd);
-            PostQuitMessage(0);
+            if USER_QUIT.load(Ordering::SeqCst) {
+                PostQuitMessage(0);
+            } else {
+                // Involuntary teardown: Windows destroyed the taskbar we were
+                // parented into (common on Win11 — relayout, DPI change,
+                // monitor sleep). Relaunch a fresh instance that re-embeds
+                // into the new taskbar instead of silently disappearing.
+                diagnose::log("WM_DESTROY without user quit -> relaunching");
+                relaunch_self();
+                // Only reached if relaunch failed to spawn a replacement.
+                PostQuitMessage(0);
+            }
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),

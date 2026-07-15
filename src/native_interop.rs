@@ -56,6 +56,10 @@ pub const TIMER_ICON_ANIM: usize = 5;
 pub const WM_APP: u32 = 0x8000;
 pub const WM_APP_USAGE_UPDATED: u32 = WM_APP + 1;
 pub const WM_APP_TRAY: u32 = WM_APP + 3;
+/// Posted by the watchdog thread when the taskbar changed but our window is
+/// still alive, asking the UI thread to re-embed into the new taskbar in
+/// place instead of relaunching the whole process.
+pub const WM_APP_REEMBED: u32 = WM_APP + 4;
 
 #[derive(Clone, Copy, Debug)]
 pub struct TaskbarWindow {
@@ -133,6 +137,11 @@ pub fn get_taskbar_rect(taskbar_hwnd: HWND) -> Option<RECT> {
         }
         Some(abd.rc)
     }
+}
+
+/// Returns true if the handle still refers to an existing window.
+pub fn is_window(hwnd: HWND) -> bool {
+    unsafe { IsWindow(hwnd).as_bool() }
 }
 
 /// Get the bounding rectangle of a window

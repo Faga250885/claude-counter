@@ -79,7 +79,12 @@ struct AppState {
     auth_watch_snapshot: poller::CredentialWatchSnapshot,
     last_poll_ok: bool,
 
+    /// The taskbar actually attached this session (may be clamped when the
+    /// preferred monitor isn't present yet). Drives the Monitor menu check.
     taskbar_index: usize,
+    /// The user's preferred taskbar index as saved on disk — never clamped,
+    /// so a monitor that comes up late at boot can still be honored on retry.
+    desired_taskbar_index: usize,
     tray_offset: i32,
     dragging: bool,
     drag_start_mouse_x: i32,
@@ -273,6 +278,27 @@ fn spawn_taskbar_watchdog() {
     });
 }
 
+/// Re-applies embedding + position a few times over the first ~15s after
+/// launch. At boot (Start with Windows) the taskbar and any secondary
+/// monitor are often not fully built when we first position, which leaves
+/// the widget in the wrong spot (e.g. mid-bar over the pinned icons). Each
+/// retry re-embeds into the preferred taskbar and repositions, so it snaps
+/// into place once Windows has finished setting up the shell.
+fn spawn_startup_settle(hwnd: SendHwnd) {
+    std::thread::spawn(move || {
+        for delay_secs in [1u64, 3, 6, 12] {
+            std::thread::sleep(Duration::from_secs(delay_secs));
+            let target = hwnd.to_hwnd();
+            if !native_interop::is_window(target) {
+                return;
+            }
+            unsafe {
+                let _ = PostMessageW(target, WM_APP_REEMBED, WPARAM(0), LPARAM(0));
+            }
+        }
+    });
+}
+
 fn load_embedded_app_icons() -> (HICON, HICON) {
     unsafe {
         let mut exe_buf = [0u16; 260];
@@ -397,7 +423,10 @@ fn save_state_settings() {
     if let Some(s) = state.as_ref() {
         save_settings(&SettingsFile {
             tray_offset: s.tray_offset,
-            taskbar_index: s.taskbar_index,
+            // Persist the user's PREFERENCE, not the possibly-clamped index
+            // actually attached this session, so a monitor absent at save
+            // time is still honored next launch.
+            taskbar_index: s.desired_taskbar_index,
             poll_interval_ms: s.poll_interval_ms,
             language: s
                 .language_override
@@ -1146,6 +1175,7 @@ pub fn run() {
                 auth_watch_snapshot: Vec::new(),
                 last_poll_ok: false,
                 taskbar_index: settings.taskbar_index,
+                desired_taskbar_index: settings.taskbar_index,
                 tray_offset: settings.tray_offset,
                 dragging: false,
                 drag_start_mouse_x: 0,
@@ -1206,6 +1236,11 @@ pub fn run() {
         // the taskbar, our embedded child window stops receiving all messages
         // (WM_TIMER included), so a timer would never fire again.
         spawn_taskbar_watchdog();
+
+        // Re-position over the first few seconds: at boot the taskbar (and a
+        // secondary monitor) may not be fully built when we first embed, so
+        // the initial placement can be wrong until the shell settles.
+        spawn_startup_settle(SendHwnd::from_hwnd(hwnd));
 
         // Initial poll
         let send_hwnd = SendHwnd::from_hwnd(hwnd);
@@ -2028,10 +2063,32 @@ fn position_at_taskbar() {
     let tray_left = tray_left_for_taskbar(taskbar_hwnd, taskbar_rect);
 
     let widget_width = total_widget_width();
-    // Clamp the offset only for THIS frame's x computation. Do NOT write the
-    // clamped value back to state/disk: a transient bad tray_left would
-    // otherwise permanently destroy the user's saved position. The stored
-    // tray_offset is only ever changed by an explicit user drag.
+    let taskbar_width = taskbar_rect.right - taskbar_rect.left;
+
+    // Self-heal a corrupted/oversized offset. For a tray-anchored widget, any
+    // offset large enough to shove it into the left half of the taskbar is
+    // always wrong (it's a leftover from an old bug that re-persisted a
+    // clamped offset). Snap it back to flush-with-tray and persist the fix so
+    // it doesn't recur. Legitimate drags stay well within this bound.
+    let left_half_limit = (tray_left - taskbar_rect.left - taskbar_width / 2).max(0);
+    let mut tray_offset = tray_offset;
+    if tray_offset > left_half_limit {
+        diagnose::log(format!(
+            "position_at_taskbar: healing bogus tray_offset={tray_offset} (limit={left_half_limit}) -> 0"
+        ));
+        tray_offset = 0;
+        {
+            let mut state = lock_state();
+            if let Some(s) = state.as_mut() {
+                s.tray_offset = 0;
+            }
+        }
+        save_state_settings();
+    }
+
+    // Clamp for THIS frame's x computation only (keeps the widget on-screen);
+    // the clamped value is not persisted, so a transient bad tray_left can't
+    // destroy the user's saved position.
     let max_offset = (tray_left - taskbar_rect.left - widget_width).max(0);
     let tray_offset = tray_offset.clamp(0, max_offset);
 
@@ -2282,11 +2339,13 @@ unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         _ if msg == WM_APP_REEMBED => {
-            // The watchdog saw the taskbar get recreated while our window is
-            // still alive. Re-embed into the current taskbar in place.
+            // Re-embed into the current taskbar in place. Triggered by the
+            // watchdog (taskbar recreated) and by the boot-settle retries.
+            // Use the user's PREFERRED index so a monitor that appears late
+            // during boot is honored once it's finally present.
             let taskbar_index = {
                 let state = lock_state();
-                state.as_ref().map(|s| s.taskbar_index).unwrap_or(0)
+                state.as_ref().map(|s| s.desired_taskbar_index).unwrap_or(0)
             };
             if attach_to_taskbar(hwnd, taskbar_index) {
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -2541,6 +2600,9 @@ unsafe extern "system" fn wnd_proc(
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
                             s.tray_offset = 0;
+                            // Explicit user choice — this becomes the saved
+                            // preference the boot retries will honor.
+                            s.desired_taskbar_index = target_index;
                         }
                     }
                     if attach_to_taskbar(hwnd, target_index) {
